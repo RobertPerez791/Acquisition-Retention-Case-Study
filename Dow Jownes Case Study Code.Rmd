@@ -1,0 +1,573 @@
+---
+title: "AcquisitionCSCode"
+author: "Robert Perez"
+date: "6/3/2021"
+output: html_document
+---
+
+### Importing the Data
+
+```{r data1}
+DJI <- read.csv("dow_jones_index.data") #25 of each stock in the dataset
+```
+
+### Cleaning Data
+
+```{r data2}
+DJI1 <- DJI
+
+DJI1$quarter <- as.factor(DJI1$quarter)
+
+DJI1$date <- as.Date(DJI1$date, "%m/%d/%Y")
+DJI1$open = as.numeric(gsub("\\$", "", DJI1$open))
+DJI1$high = as.numeric(gsub("\\$", "", DJI1$high))
+DJI1$low = as.numeric(gsub("\\$", "", DJI1$low))
+DJI1$close = as.numeric(gsub("\\$", "", DJI1$close))
+DJI1$next_weeks_close = as.numeric(gsub("\\$", "", DJI1$next_weeks_close))
+DJI1$next_weeks_open = as.numeric(gsub("\\$", "", DJI1$next_weeks_open))
+DJI1$stock <- as.factor(DJI1$stock)
+stocknames = levels(DJI1$stock)
+
+```
+
+```{r data3}
+
+Week = strftime(DJI1$date, format = "%V")
+DJI1 = cbind(Week, DJI1)
+DJI1$Week <- as.numeric(DJI1$Week)
+DJI1 <- DJI1[order(DJI1$stock),]
+str(DJI1)
+```
+
+```{r data0}
+DJI1 <- DJI1[-c(13:14,16:17)] #Not using "next" columns as predictors
+```
+
+### Creating lag plots
+
+```{r}
+CNamesFunction <- function(dataframe)
+{
+  ColumnNames = colnames(dataframe)
+}
+```
+
+```{r}
+LagPlotFunc <- function(column, lagnumber) 
+{
+  lag.plot(column, set.lags = 1:lagnumber)
+}
+
+```
+
+```{r}
+LagVars = CNamesFunction(Filter(is.numeric, DJI1)[,1:10]) # only first 10 columns, all other numeric variables are lag variables
+
+for(i in LagVars)
+{ 
+data = DJI1[[i]]  
+ LagPlotFunc(na.omit(data),4)
+}
+```
+
+
+### Creating lag variables
+
+```{r data4}
+LagValFunction <-  function(variname) 
+{
+  print(lag(variname, 1))
+}
+```
+
+```{r data5}
+open.lag <- c()
+high.lag <- c()
+low.lag <- c()
+close.lag <- c()
+volume.lag <- c()
+percent_change_price.lag <- c()
+percent_change_volume_over_last_wk.lag <- c()
+previous_weeks_volume.lag <- c()
+percent_change_next_weeks_price.lag <- c()
+```
+
+```{r data6, results="hide"}
+for(i in stocknames)
+{ 
+  x = filter(DJI1,stock == i)
+  
+  open.lag <- c(open.lag,LagValFunction(x$open))
+  high.lag <- c(high.lag,LagValFunction(x$high))
+  low.lag <- c(low.lag,LagValFunction(x$low))
+  close.lag <- c(close.lag,LagValFunction(x$close))
+  volume.lag <- c(volume.lag,LagValFunction(x$volume))
+  percent_change_price.lag <- c(percent_change_price.lag,LagValFunction(x$percent_change_price))
+  percent_change_volume_over_last_wk.lag <- c(percent_change_volume_over_last_wk.lag,LagValFunction(x$percent_change_volume_over_last_wk))
+  previous_weeks_volume.lag <- c(previous_weeks_volume.lag,LagValFunction(x$previous_weeks_volume))
+  percent_change_next_weeks_price.lag <- c(percent_change_next_weeks_price.lag,LagValFunction(x$percent_change_next_weeks_price))
+
+}
+
+DJI1 <- cbind(DJI1,open.lag, high.lag, low.lag, close.lag,volume.lag,percent_change_price.lag,percent_change_volume_over_last_wk.lag,previous_weeks_volume.lag,percent_change_next_weeks_price.lag)
+```
+
+### Splitting the Data
+
+```{r data7}
+DJI1 <- na.omit(DJI1)  #Removes the 1/7/2011 week from all stocks, because the there are missing percent change variables.  This is because they are the first variable in the time series.
+head(DJI1)
+```
+
+```{r data8}
+DJI1Training <- DJI1[ which(DJI1$quarter=='1'),]
+DJI1Test <- DJI1[ which(DJI1$quarter=='2'),]
+```
+
+### Scatter Plots
+
+```{r}
+PlotAxis = CNamesFunction(DJI1)
+```
+
+```{r}
+ScatterFunction <- function(column, var_name) 
+{
+  plot(DJI1$percent_change_next_weeks_price, column, main="Next Week Percent Change Scatterplot",
+   xlab="Percent Change in Next Weeks Price ", ylab = var_name, pch=19)
+}
+```
+
+```{r}
+for(i in PlotAxis)
+{ 
+data = DJI1[[i]]  
+ ScatterFunction(data,i)
+}
+```
+
+```{r}
+ScatterFunction <- function(response, column, xlabel, ylabel) 
+{
+  plot(response, column, main="Next Week Percent Change Scatterplot",
+   xlab= xlabel , ylab = ylabel, pch=19)
+  
+  points(predict(lm(column ~ response)), col = "red", pch = 19)
+}
+  
+  
+for (i in stocknames)
+{
+  x = filter(DJI1, stock == i)
+  
+  ScatterFunction(x$Week, x$percent_change_next_weeks_price,  "Week", "Percent Change in Next Week's Price")
+}
+```
+
+
+### Determing the formula for regression
+
+```{r}
+DJI2 <- na.omit(DJI1) #DJI2 omits NAs in DJI1 in order for "cor" function to generate correlation values for lag variables.
+num_cols <- unlist((lapply(DJI2, is.numeric)))
+CorValues <- data.frame(cor(DJI2[, na.omit(num_cols)]))
+PerChangeNextCorVals <- CorValues[10]
+PerChangeNextCorVals <- PerChangeNextCorVals %>% rownames_to_column('Variable') #preserves variable names for ease of access
+PerChangeNextCorVals <- PerChangeNextCorVals[-c(10),] #removing the correlation between Next Weeks Price and itself
+```
+
+```{r}
+AveragePerCorVal <- mean(PerChangeNextCorVals$percent_change_next_weeks_price)
+AveragePerCorVal
+```
+
+```{r}
+FormulaCorVals <- (PerChangeNextCorVals[PerChangeNextCorVals$percent_change_next_weeks_price > AveragePerCorVal,])
+
+View(FormulaCorVals)
+
+```
+
+```{r}
+(FormulaCorVals$Variable)
+```
+
+```{r}
+LM1 = lm(percent_change_next_weeks_price ~ Week + open + high + low + close + percent_change_price + percent_change_volume_over_last_wk + open.lag + close.lag + high.lag + low.lag + percent_change_volume_over_last_wk.lag + percent_change_next_weeks_price.lag, data = DJI1) 
+#car::vif(LM1) #<- cannot run VIF due to aliased coefficients
+```
+
+```{r}
+ld.vars <- attributes(alias(LM1)$Complete)$dimnames[[1]]
+print(ld.vars) # Outputs aliased coefficients
+```
+
+```{r}
+LM2 = lm(percent_change_next_weeks_price ~ Week + open + high + low + close + percent_change_price + percent_change_volume_over_last_wk + open.lag + close.lag + high.lag + low.lag + percent_change_volume_over_last_wk.lag, data = DJI1) 
+car::vif(LM2)
+```
+
+```{r}
+LM3 = lm(percent_change_next_weeks_price ~ Week + open + high + low + close + percent_change_price + percent_change_volume_over_last_wk + open.lag + high.lag + low.lag + percent_change_volume_over_last_wk.lag, data = DJI1) 
+car::vif(LM3)
+```
+
+```{r}
+LM4 = lm(percent_change_next_weeks_price ~ Week + high + low + close + percent_change_price + percent_change_volume_over_last_wk + open.lag + high.lag + low.lag + percent_change_volume_over_last_wk.lag, data = DJI1) 
+car::vif(LM4)
+```
+
+```{r}
+LM5 = lm(percent_change_next_weeks_price ~ Week + high + low + percent_change_price + percent_change_volume_over_last_wk + open.lag + high.lag + low.lag + percent_change_volume_over_last_wk.lag, data = DJI1) 
+car::vif(LM5)
+```
+
+```{r}
+LM6 = lm(percent_change_next_weeks_price ~ Week + high + low + percent_change_price + percent_change_volume_over_last_wk + open.lag + low.lag + percent_change_volume_over_last_wk.lag, data = DJI1) 
+car::vif(LM6)
+```
+
+```{r}
+LM7 = lm(percent_change_next_weeks_price ~ Week + high + low + percent_change_price + percent_change_volume_over_last_wk + open.lag + percent_change_volume_over_last_wk.lag, data = DJI1) 
+car::vif(LM7)
+```
+
+```{r}
+LM8 = lm(percent_change_next_weeks_price ~ Week + low + percent_change_price + percent_change_volume_over_last_wk + open.lag + percent_change_volume_over_last_wk.lag, data = DJI1) 
+car::vif(LM8)
+```
+
+```{r}
+LM9 = lm(percent_change_next_weeks_price ~ Week + percent_change_price + percent_change_volume_over_last_wk + open.lag + percent_change_volume_over_last_wk.lag, data = DJI1) 
+car::vif(LM9)
+```
+
+```{r data9}
+formulafinal = percent_change_next_weeks_price ~ Week + percent_change_price + percent_change_volume_over_last_wk + open.lag + percent_change_volume_over_last_wk.lag
+```
+
+### Creating the Linear Model and MSE
+
+```{r}
+StockFunctionL <- function (training, testing, formula)  {
+  set.seed(111)
+
+  LinearModel <- lm(formula, data = training)
+
+  LinearPreds <- predict(LinearModel, newdata = testing)
+
+  LinearSumm <- (summary(LinearModel))
+
+  MSE.Linear <- (mean((testing$percent_change_next_weeks_price - LinearPreds)^2))
+
+  print(MSE.Linear)
+}
+```
+
+```{r}
+MSE.L <- c()
+
+for (i in stocknames)
+{x = filter((DJI1Training), stock == i)
+
+  y = filter(DJI1Test, stock == i)
+
+  MSE.L <- c(MSE.L,StockFunctionL(x, y, formulafinal))
+  
+  
+  
+}
+view(MSE.L)
+
+df <- data.frame(stocknames, MSE.L)
+```
+
+### Creating the Tree Model and MSE
+
+```{r}
+StockFunctionTree <- function(training, testing, formula) {
+  set.seed(111)
+  
+  TreeModel <- tree(formula, data = training)
+ 
+  TreePreds <- predict(TreeModel, newdata = testing)
+  
+  MSE.Tree <- (mean((testing$percent_change_next_weeks_price - TreePreds)^2))
+
+  print(MSE.Tree)
+}
+```
+
+```{r}
+MSE.T <- c()
+
+for (i in stocknames)
+{x = filter(DJI1Training, stock == i)
+
+  y = filter(DJI1Test, stock == i)
+
+  MSE.T <- c(MSE.T,StockFunctionTree(x, y, formulafinal))
+  
+}
+
+view(MSE.T)
+
+```
+
+### Creating the SVR Model and MSE
+
+```{r}
+StockFunctionSVR <- function(training, testing, formula) {
+  set.seed(111)
+  
+  svmtune <- tune.svm(formula, data = training, gamma =seq(.01, 0.1, by = .01), cost = seq(0.1,1, by = 0.1))
+  
+  SVRModel <- svm(formula, data = training, kernel = "radial", cost = svmtune$best.parameters$cost, gamma = svmtune$best.parameters$gamma)
+ 
+  SVRPreds <- predict(SVRModel, newdata = testing)
+  
+  MSE.SVR <- (mean((testing$percent_change_next_weeks_price - SVRPreds)^2))
+
+  print(MSE.SVR)
+}
+```
+
+```{r}
+MSE.SVR <- c()
+
+for (i in stocknames)
+{x = filter(DJI1Training, stock == i)
+
+  y = filter(DJI1Test, stock == i)
+
+  MSE.SVR <- c(MSE.SVR,StockFunctionSVR(x, y, formulafinal))
+  
+}
+
+view(MSE.SVR)
+```
+
+### Calculating MSE Averages
+
+```{r}
+MSEDataFrame <- (cbind(df, MSE.T, MSE.SVR))
+MSEDataFrame <- data.frame(MSEDataFrame)
+```
+
+```{r}
+MSE.LAvg <- mean(MSEDataFrame$MSE.L)
+MSE.TAvg <- mean(MSEDataFrame$MSE.T)
+MSE.SVRAvg <- mean(MSEDataFrame$MSE.SVR)
+```
+
+```{r}
+MSE.LAvg
+```
+
+```{r}
+MSE.TAvg
+```
+
+```{r}
+MSE.SVRAvg
+```
+
+### SVR Model with all variables, for comparison
+
+```{r}
+SVRALL <- c()
+
+for (i in stocknames)
+{x = filter(DJI1Training, stock == i)
+
+  y = filter(DJI1Test, stock == i)
+
+  SVRALL <- c(SVRALL,StockFunctionSVR(x, y, percent_change_next_weeks_price ~ Week + open + high + low + close + percent_change_price + percent_change_volume_over_last_wk + open.lag + close.lag + high.lag + low.lag + percent_change_volume_over_last_wk.lag))
+  
+}
+
+view(SVRALL)
+```
+
+```{r}
+SVRComparison <- cbind(SVRALL, MSE.SVR)
+mean(SVRALL)
+```
+
+### Creating the CAPM Model and Beta Values
+
+```{r data10}
+DJICAPM1 <-split(DJI1Test, DJI1Test$stock)
+SP500Data <-read.csv("S&P_500.csv", header = TRUE, sep = ",")
+SP500Data1 = na.omit(SP500Data)
+SP500Data1$Date <- as.Date(SP500Data1$Date, "%m/%d/%Y")
+```
+
+```{r data11}
+ReturnSP500 = na.omit(Delt(SP500Data1[,5]))
+ReturnAA = na.omit(Delt(DJICAPM1$AA[,7]))
+ReturnAXP = na.omit(Delt(DJICAPM1$AXP[,7]))
+ReturnBA = na.omit(Delt(DJICAPM1$BA[,7]))
+ReturnBAC = na.omit(Delt(DJICAPM1$BAC[,7]))
+ReturnCAT = na.omit(Delt(DJICAPM1$CAT[,7]))
+ReturnCSCO = na.omit(Delt(DJICAPM1$CSCO[,7]))
+ReturnCVX = na.omit(Delt(DJICAPM1$CVX[,7]))
+ReturnDD = na.omit(Delt(DJICAPM1$DD[,7]))
+ReturnDIS = na.omit(Delt(DJICAPM1$DIS[,7]))
+ReturnGE = na.omit(Delt(DJICAPM1$GE[,7]))
+ReturnHD = na.omit(Delt(DJICAPM1$HD[,7]))
+ReturnHPQ = na.omit(Delt(DJICAPM1$HPQ[,7]))
+ReturnIBM = na.omit(Delt(DJICAPM1$IBM[,7]))
+ReturnINTC = na.omit(Delt(DJICAPM1$INTC[,7]))
+ReturnJNJ = na.omit(Delt(DJICAPM1$JNJ[,7]))
+ReturnJPM = na.omit(Delt(DJICAPM1$JPM[,7]))
+ReturnKO = na.omit(Delt(DJICAPM1$KO[,7]))
+ReturnKRFT = na.omit(Delt(DJICAPM1$KRFT[,7]))
+ReturnMCD = na.omit(Delt(DJICAPM1$MCD[,7]))
+ReturnMMM = na.omit(Delt(DJICAPM1$MMM[,7]))
+ReturnMRK = na.omit(Delt(DJICAPM1$MRK[,7]))
+ReturnMSFT = na.omit(Delt(DJICAPM1$MSFT[,7]))
+ReturnPFE = na.omit(Delt(DJICAPM1$PFE[,7]))
+ReturnPG = na.omit(Delt(DJICAPM1$PG[,7]))
+ReturnT = na.omit(Delt(DJICAPM1$T[,7]))
+ReturnTRV = na.omit(Delt(DJICAPM1$TRV[,7]))
+ReturnUTX = na.omit(Delt(DJICAPM1$UTX[,7]))
+ReturnVZ = na.omit(Delt(DJICAPM1$VZ[,7]))
+ReturnWMT = na.omit(Delt(DJICAPM1$WMT[,7]))
+ReturnXOM = na.omit(Delt(DJICAPM1$XOM[,7]))
+```
+
+```{r data12}
+DataCAPM = cbind(ReturnSP500, ReturnAA, ReturnAXP, ReturnBA, ReturnBAC, ReturnCAT, ReturnCSCO, ReturnCVX, ReturnDD,
+               ReturnDIS, ReturnGE, ReturnHD, ReturnHPQ, ReturnIBM, ReturnINTC, ReturnJNJ, ReturnJPM, ReturnKO,
+               ReturnKRFT, ReturnMCD, ReturnMMM, ReturnMRK, ReturnMSFT, ReturnPFE, ReturnPG, ReturnT, ReturnTRV,
+               ReturnUTX, ReturnVZ, ReturnWMT, ReturnXOM)
+```
+
+```{r data13}
+colnames(DataCAPM) = c("SP500", "Alcoa", "American Express", "Boeing","Bank of America","Caterpillar", "Cisco",
+                     "Chevron","DuPont","Walt Disney", "General Electric", "Home Depot", "HP", "IBM", "Intel",
+                     "J&J", "JPMorgan", "Coca-Cola", "KRFT", "McDonald's", "3M", "Merck", "Microsoft", "Pfizer",
+                     "Procter & Gamble", "AT&T", "Travelers", "Raytheon", "Verizon", "Walmart", "Exxon")
+head(DataCAPM)
+```
+
+```{r, fig.height= 10, fig.width= 25}
+boxplot(DataCAPM,main="Expected Return", xlab="Stock Picks", ylab="Return", las = 2)
+```
+
+```{r}
+DataMean=apply(DataCAPM, 2, mean)
+DataSD=apply(DataCAPM, 2, sd)
+```
+
+```{r}
+cbind(DataMean,DataSD)
+```
+
+```{r data14}
+DataCAPM1 = data.frame(DataCAPM)
+```
+
+```{r data15}
+CAPMFunction <- function (stockname)  {
+  set.seed(111)
+
+  LinearModel <- lm(stockname ~ SP500, data = DataCAPM1)
+
+  LinearSumm <- (summary(LinearModel))
+  
+  BetaVal <- (LinearSumm)$coefficients[2, 1]
+
+  print(BetaVal)
+}
+```
+
+```{r data16}
+CAPMNames <- colnames(DataCAPM1[,2:31])
+CAPMNames
+```
+
+```{r data17}
+BetaVals <- c()
+
+for(i in CAPMNames)
+{ 
+data = DataCAPM1[[i]]  
+  BetaVals <- c(BetaVals,CAPMFunction((data)))
+  
+  
+  
+}
+
+view(BetaVals)
+```
+
+```{r data18}
+VariableNames<- c("Alcoa", "American Express", "Boeing","Bank of America","Caterpillar", "Cisco",
+                     "Chevron","DuPont","Walt Disney", "General Electric", "Home Depot", "HP", "IBM", "Intel",
+                     "J&J", "JPMorgan", "Coca-Cola", "KRFT", "McDonald's", "3M", "Merck", "Microsoft", "Pfizer",
+                     "Procter & Gamble", "AT&T", "Travelers", "Raytheon", "Verizon", "Walmart", "Exxon")
+
+BetaVals <- cbind(VariableNames, BetaVals)
+BetaVals <- (data.frame(BetaVals))
+```
+
+```{r}
+BetaVals
+```
+
+```{r data19}
+BetaVals$BetaVals <- round(as.numeric(BetaVals$BetaVals),4)
+BetaVals
+```
+
+### Predicting using the SVR Model
+
+```{r data20}
+SVRPredsValues <- function(training, testing, formula) {
+  set.seed(111)
+  
+  svmtune <- tune.svm(formula, data = training, gamma =seq(.01, 0.1, by = .01), cost = seq(0.1,1, by = 0.1))
+  
+  SVRModel <- svm(formula, data = training, kernel = "radial", cost = svmtune$best.parameters$cost, gamma = svmtune$best.parameters$gamma)
+ 
+  SVRPreds <- predict(SVRModel, newdata = testing)
+
+  print(SVRPreds)
+}
+```
+
+```{r data21}
+SVRNextWeek <- c()
+
+for (i in stocknames)
+{
+x = filter(DJI1Training, stock == i)
+
+y = filter(DJI1Test, stock == i & Week == 25)
+
+SVRNextWeek <- c(SVRNextWeek,SVRPredsValues(x, y, formulafinal))
+}
+
+view(SVRNextWeek)
+```
+
+### Combining Values
+
+```{r data22}
+SVRNextWeek1 <- data.frame(SVRNextWeek)
+SVRNextWeek1 <- cbind(VariableNames,SVRNextWeek1)
+
+```
+
+```{r data23}
+ComparisonDF <- cbind(SVRNextWeek1, BetaVals$BetaVals)
+ComparisonDF <- ComparisonDF %>% 
+  rename("Percent Change Prediction for Next Week"  = SVRNextWeek,
+         "Beta Value" = "BetaVals$BetaVals")
+```
+
+```{r Final}
+head(ComparisonDF,30)
+```
